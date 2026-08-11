@@ -15,6 +15,9 @@ DisplayManager::DisplayManager()
     , _cachedA(0)
     , _cachedB(0)
     , _cachedMsg("")
+    , _mesaId("")
+    , _callSign("")
+    , _wrongAp(false)
 {}
 
 // ---------------------------------------------------------------------------
@@ -46,7 +49,7 @@ void DisplayManager::begin() {
 
     // Initial state will be set by the caller (main.cpp)
     // but default to BOOT rendering
-    _state       = State::BOOT;
+    _state        = State::BOOT;
     _stateStartMs = millis();
     render();
 }
@@ -77,7 +80,7 @@ void DisplayManager::tick() {
     switch (_state) {
         case State::BOOT:
             if (elapsed >= 2000) {
-                transitionTo(State::IDLE);
+                transitionTo(State::CONNECTING);
             }
             break;
 
@@ -95,9 +98,25 @@ void DisplayManager::tick() {
             }
             break;
 
-        default:
-            // IDLE, CONNECTED, ERROR, RECONNECTING — no auto-advance
+        case State::CONNECTED:
+        case State::RECONNECTING:
+        case State::UNBOUND:
+        case State::FINISHED:
+            // Connected states fall to SLEEP after inactivity (E13).
+            if (elapsed >= SLEEP_TIMEOUT_MS) {
+                transitionTo(State::SLEEP);
+            }
             break;
+
+        default:
+            // CONNECTING, IDLE, ERROR, SLEEP — no auto-advance.
+            break;
+    }
+}
+
+void DisplayManager::wake() {
+    if (_state == State::SLEEP) {
+        transitionTo(State::CONNECTED);
     }
 }
 
@@ -111,6 +130,14 @@ void DisplayManager::transitionTo(State s) {
     if (_state == State::PRESSING && s != State::PRESSING) {
         _display.invertDisplay(false);
     }
+
+    // Physical display on/off for SLEEP (E13/E15).
+    if (s == State::SLEEP) {
+        _display.ssd1306_command(SSD1306_DISPLAYOFF);
+    } else if (_state == State::SLEEP) {
+        _display.ssd1306_command(SSD1306_DISPLAYON);
+    }
+
     _state        = s;
     _stateStartMs = millis();
     if (_displayAvailable) {
@@ -136,11 +163,15 @@ void DisplayManager::render() {
     switch (_state) {
         case State::BOOT:          renderBoot();          break;
         case State::IDLE:          renderIdle();          break;
+        case State::CONNECTING:    renderConnecting();    break;
         case State::CONNECTED:     renderConnected();     break;
         case State::PRESSING:      renderPressing();      break;
         case State::CONFIRMING:    renderConfirming();    break;
         case State::ERROR:         renderError();         break;
         case State::RECONNECTING:  renderReconnecting();  break;
+        case State::UNBOUND:       renderUnbound();       break;
+        case State::FINISHED:      renderFinished();      break;
+        case State::SLEEP:         renderSleep();         break;
     }
 }
 
@@ -173,22 +204,38 @@ void DisplayManager::renderIdle() {
     _display.display();
 }
 
+void DisplayManager::renderConnecting() {
+    _display.clearDisplay();
+
+    _display.setTextSize(1);
+    _display.setTextColor(SSD1306_WHITE);
+
+    if (_wrongAp) {
+        // Fatal wrong/unreachable AP (FW-1/E6) — CONNECTING stops oscillating.
+        _display.setCursor(0, 20);
+        _display.println("Wrong AP");
+        _display.setCursor(0, 36);
+        _display.println("check network");
+    } else {
+        _display.setCursor(0, 28);
+        _display.println("Conectando...");
+    }
+
+    _display.display();
+}
+
 void DisplayManager::renderConnected() {
     _display.clearDisplay();
 
-    _display.setTextSize(2);
+    _display.setTextSize(1);
     _display.setTextColor(SSD1306_WHITE);
+    _display.setCursor(0, 0);
+    _display.println("Mesa " + mesaNumber() + " OK");   // ASCII for ✓ (GFX font)
 
     if (_score != nullptr) {
-        _display.setCursor(0, 12);
+        _display.setTextSize(2);
+        _display.setCursor(0, 18);
         _display.println(_score->formatDisplay());
-
-        _display.setTextSize(1);
-        _display.setCursor(0, 48);
-        _display.println(" Connected");
-    } else {
-        _display.setCursor(0, 24);
-        _display.println("Connected");
     }
 
     _display.display();
@@ -241,8 +288,67 @@ void DisplayManager::renderReconnecting() {
 
     _display.setTextSize(1);
     _display.setTextColor(SSD1306_WHITE);
-    _display.setCursor(0, 28);
-    _display.println(" Reconnecting...");
+    _display.setCursor(0, 20);
+    _display.println("Mesa " + mesaNumber());          // ASCII for ⚉ (GFX font)
+    _display.setCursor(0, 36);
+    _display.println("buscando hub");
 
     _display.display();
+}
+
+void DisplayManager::renderUnbound() {
+    _display.clearDisplay();
+
+    _display.setTextSize(1);
+    _display.setTextColor(SSD1306_WHITE);
+    _display.setCursor(0, 12);
+    _display.println("Sin emparajar");
+    _display.setCursor(0, 28);
+    _display.println("Pair me " + _callSign);          // BND-5 — 4-char call-sign
+
+    _display.display();
+}
+
+void DisplayManager::renderFinished() {
+    _display.clearDisplay();
+
+    _display.setTextSize(2);
+    _display.setTextColor(SSD1306_WHITE);
+    _display.setCursor(0, 14);
+    _display.print("Fin: ");
+    if (_score != nullptr) {
+        _display.print(_score->getSetA());
+        _display.print("-");
+        _display.print(_score->getSetB());
+    }
+
+    _display.setTextSize(1);
+    _display.setCursor(0, 44);
+    _display.println("new match from mobile");         // MATCH-2
+
+    _display.display();
+}
+
+void DisplayManager::renderSleep() {
+    // The panel itself was switched off in transitionTo(State::SLEEP);
+    // just keep the frame cleared for a clean re-render on wake.
+    _display.clearDisplay();
+    _display.display();
+}
+
+// ===========================================================================
+// Mesa label helpers
+// ===========================================================================
+
+String DisplayManager::mesaNumber() const {
+    // "court-3" -> "3". Falls back to the raw mesaId when there is no
+    // trailing digit sequence (e.g. empty or a label without a number).
+    const size_t len = _mesaId.length();
+    for (size_t i = len; i > 0; i--) {
+        char c = _mesaId[i - 1];
+        if (c >= '0' && c <= '9') continue;
+        if (i == len) return "";                 // no trailing digits
+        return _mesaId.substring(i, len);        // digits run [i, len)
+    }
+    return _mesaId;
 }
