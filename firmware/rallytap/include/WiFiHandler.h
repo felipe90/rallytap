@@ -9,12 +9,13 @@
 
 /// WiFi STA + thin plain-WebSocket client (FW-1, PROTO-4, WS-3).
 ///
-/// Replaces BLEHandler: connects to the dedicated tap AP, reconnects with
-/// exponential backoff + jitter, and runs the rallytap WS client with a
-/// ping/pong heartbeat. On every (re)connect it re-runs the rallytap.register
-/// handshake (PROTO-1) so the hub re-binds the tap mid-match. A wrong or
-/// unreachable AP terminates in the FATAL phase after FATAL_TIMEOUT_MS so the
-/// tap stops oscillating (E6) — main.cpp renders "Wrong AP" on the OLED.
+/// Retires the Phase-1 GATT bridge: connects to the dedicated tap AP,
+/// reconnects with exponential backoff + jitter, and runs the rallytap WS
+/// client with a ping/pong heartbeat. On every (re)connect it re-runs the
+/// rallytap.register handshake (PROTO-1) so the hub re-binds the tap
+/// mid-match. A wrong or unreachable AP terminates in the FATAL phase after
+/// FATAL_TIMEOUT_MS so the tap stops oscillating (E6) — main.cpp renders
+/// "Wrong AP" on the OLED.
 class WiFiHandler {
 public:
     WiFiHandler();
