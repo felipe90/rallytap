@@ -18,12 +18,10 @@
 
 static ScoreManager sm;
 
-void setUp(void) {
-    // Reset to defaults before each test
-    sm = ScoreManager();
-}
+void runTests_score(void);   // registered by test_main.cpp
 
-void tearDown(void) {}
+// Unity's setUp/tearDown live in test_main.cpp; reset here per test.
+static void resetScore() { sm = ScoreManager(); }
 
 // ---------------------------------------------------------------------------
 // fromJSON() — valid payload
@@ -165,21 +163,17 @@ void test_getters_after_parsing(void) {
 }
 
 // ---------------------------------------------------------------------------
-// Runner
+// Runner — registered from test_main.cpp
 // ---------------------------------------------------------------------------
 
-int main(int argc, char** argv) {
-    UNITY_BEGIN();
-
-    RUN_TEST(test_fromJSON_valid_score);
-    RUN_TEST(test_fromJSON_malformed_returns_false);
-    RUN_TEST(test_fromJSON_empty_returns_false);
-    RUN_TEST(test_fromJSON_partial_fields_default_values);
-    RUN_TEST(test_fromJSON_extra_fields_ignored);
-    RUN_TEST(test_fromJSON_status_error);
-    RUN_TEST(test_fromJSON_msg_field);
-    RUN_TEST(test_formatDisplay_output);
-    RUN_TEST(test_getters_after_parsing);
-
-    return UNITY_END();
+void runTests_score(void) {
+    resetScore(); RUN_TEST(test_fromJSON_valid_score);
+    resetScore(); RUN_TEST(test_fromJSON_malformed_returns_false);
+    resetScore(); RUN_TEST(test_fromJSON_empty_returns_false);
+    resetScore(); RUN_TEST(test_fromJSON_partial_fields_default_values);
+    resetScore(); RUN_TEST(test_fromJSON_extra_fields_ignored);
+    resetScore(); RUN_TEST(test_fromJSON_status_error);
+    resetScore(); RUN_TEST(test_fromJSON_msg_field);
+    resetScore(); RUN_TEST(test_formatDisplay_output);
+    resetScore(); RUN_TEST(test_getters_after_parsing);
 }

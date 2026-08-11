@@ -272,6 +272,24 @@ static inline bool operator!=(const char* lhs, const String& rhs) {
 }
 
 // ---------------------------------------------------------------------------
+// random() — deterministic LCG so host tests can exercise backoff jitter.
+// Same [min, max) contract as the Arduino core.
+// ---------------------------------------------------------------------------
+
+static unsigned long _randState = 1;
+
+static inline unsigned long random(unsigned long howbig) {
+    if (howbig == 0) return 0;
+    _randState = _randState * 1103515245UL + 12345UL;
+    return (_randState >> 16) % howbig;
+}
+
+static inline long random(long howsmall, long howbig) {
+    if (howbig <= howsmall) return howsmall;
+    return howsmall + random(static_cast<unsigned long>(howbig - howsmall));
+}
+
+// ---------------------------------------------------------------------------
 // abs() — redefinition guard
 // ---------------------------------------------------------------------------
 
