@@ -11,6 +11,10 @@ ButtonHandler::ButtonHandler()
     , _lastDebounceTimeB(0)
     , _lastPressTime(0)
     , _cooldownActive(false)
+    , _devId("")
+    , _head(0)
+    , _tail(0)
+    , _count(0)
 {}
 
 void ButtonHandler::begin(int pinA, int pinB) {
@@ -94,4 +98,51 @@ PressResult ButtonHandler::poll() {
     }
 
     return PressResult::NONE;
+}
+
+// ===========================================================================
+// Press uplink FIFO (FW-4 / A7 / E8 / E12)
+// ===========================================================================
+
+String ButtonHandler::buttonJson(const String& devId, PressResult button) {
+    StaticJsonDocument<128> doc;
+    doc["type"]   = "rallytap.score";
+    doc["devId"]  = devId;
+    doc["button"] = (button == PressResult::A) ? "A" : "B";
+
+    String out;
+    serializeJson(doc, out);
+    return out;
+}
+
+void ButtonHandler::enqueue(PressResult button) {
+    String json = buttonJson(_devId, button);
+
+    if (_count == FIFO_CAPACITY) {
+        // Overflow — drop the OLDEST event, keep the newest (E12).
+        Serial.println("[Button] FIFO full — dropping oldest event");
+        _head = (_head + 1) % FIFO_CAPACITY;
+        _count--;
+    }
+
+    _fifo[_tail] = json;
+    _tail = (_tail + 1) % FIFO_CAPACITY;
+    _count++;
+}
+
+bool ButtonHandler::dequeue(String& out) {
+    if (_count == 0) {
+        return false;
+    }
+
+    out  = _fifo[_head];
+    _head = (_head + 1) % FIFO_CAPACITY;
+    _count--;
+    return true;
+}
+
+void ButtonHandler::clear() {
+    _head  = 0;
+    _tail  = 0;
+    _count = 0;
 }
