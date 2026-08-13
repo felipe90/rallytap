@@ -9,10 +9,9 @@ WiFiHandler* WiFiHandler::_instance = nullptr;
 // ---------------------------------------------------------------------------
 
 WiFiHandler::WiFiHandler()
-    : _ssid(nullptr)
-    , _psk(nullptr)
-    , _hubHost(nullptr)
-    , _hubPort(3001)
+    : _profiles(nullptr)
+    , _profileCount(0)
+    , _profileIndex(0)
     , _devId("")
     , _label("")
     , _fw("")
@@ -31,17 +30,15 @@ WiFiHandler::WiFiHandler()
 // Initialisation
 // ---------------------------------------------------------------------------
 
-void WiFiHandler::begin(const char* ssid, const char* psk,
-                        const char* hubHost, uint16_t hubPort,
+void WiFiHandler::begin(const TapNetworkProfile* profiles, size_t profileCount,
                         const String& devId, const String& label,
                         const char* fw) {
-    _ssid    = ssid;
-    _psk     = psk;
-    _hubHost = hubHost;
-    _hubPort = hubPort;
-    _devId   = devId;
-    _label   = label;
-    _fw      = fw;
+    _profiles     = profiles;
+    _profileCount = (profileCount > 0) ? profileCount : 1;
+    _profileIndex = 0;
+    _devId        = devId;
+    _label        = label;
+    _fw           = fw;
 
     _attempt = 0;
     _beginMs = millis();
@@ -71,7 +68,15 @@ void WiFiHandler::loop() {
             } else {
                 unsigned long backoff = wifiBackoffMs(_attempt);
                 if (now - _phaseStartMs >= backoff) {
-                    _attempt++;
+                    // Give the current profile a few backoff ticks, then
+                    // rotate to the next configured AP (multi-network
+                    // fallback: deploy AP -> dev AP). FATAL only after the
+                    // global timeout has passed without ANY profile linking.
+                    if (_attempt >= PROFILE_ATTEMPTS_PER_PROFILE) {
+                        advanceProfile();
+                    } else {
+                        _attempt++;
+                    }
                     if (now - _beginMs >= FATAL_TIMEOUT_MS) {
                         enterFatal();
                         return;
@@ -124,14 +129,27 @@ void WiFiHandler::startConnectAttempt() {
     _phase        = Phase::CONNECTING;
     _phaseStartMs = millis();
 
+    const TapNetworkProfile& profile = _profiles[_profileIndex % _profileCount];
+
     WiFi.disconnect(true);
     delay(100);
     WiFi.mode(WIFI_STA);
-    WiFi.begin(_ssid, _psk);
+    WiFi.begin(profile.ssid, profile.psk);
+}
+
+const TapNetworkProfile& WiFiHandler::currentProfile() const {
+    return _profiles[_profileIndex % _profileCount];
+}
+
+void WiFiHandler::advanceProfile() {
+    _profileIndex = (_profileIndex + 1) % _profileCount;
+    _attempt      = 0;
+    _phaseStartMs = millis();
 }
 
 void WiFiHandler::initWebSocket() {
-    _ws.begin(_hubHost, _hubPort, "/");
+    const TapNetworkProfile& profile = currentProfile();
+    _ws.begin(profile.hubHost, profile.hubPort, "/");
     _ws.onEvent(WiFiHandler::onWsEvent);
     _ws.enableHeartbeat(WS_HEARTBEAT_MS, WS_HEARTBEAT_TO_MS, 0);  // WS-3
     _ws.setReconnectInterval(1000);

@@ -25,13 +25,19 @@
 
 // ===========================================================================
 // Installation configuration (hardcoded at install — SoftAP provisioning is
-// Phase 2.1). SSID segregation is the v1 trust boundary (AC-4).
+// Phase 2.1). Multi-profile: the tap rotates APs until one connects. The
+// deploy profile joins the hub's existing open AP (`RallyOS`, wpa=0) instead
+// of a dedicated tap SSID (AC-4 relaxed by user decision); the dev profile
+// is the lab/local AP used for hardware-in-the-loop on the dev machine.
 // ===========================================================================
 
-static const char* WIFI_SSID   = "RallyTap-2.4G";   // dedicated tap SSID
-static const char* WIFI_PSK    = "rallytap-install";
-static const char* HUB_HOST    = "192.168.4.1";     // static hub IP on tap SSID (WS-2)
-static const uint16_t HUB_PORT = 3001;              // TAP_WS_PORT
+static const TapNetworkProfile NETWORK_PROFILES[] = {
+    // Deploy — hub's open AP (setup-orangepi-ap.sh: AP_SSID=RallyOS, wpa=0)
+    { "RallyOS", "", "192.168.4.1", 3001 },
+    // Dev / HIL — local AP on the dev machine's LAN
+    { "TIMELINE-56", "Eraso1648", "192.168.20.57", 3001 },
+};
+
 static const char* FW_VERSION  = "2.0.0";           // reported in register
 
 // ===========================================================================
@@ -131,8 +137,10 @@ void setup() {
     buttonHandler.setDevId(devId);
     displayManager.setCallSign(cs);
 
-    // 3. Initialise WiFiHandler (STA + WS client + register on connect)
-    wifiHandler.begin(WIFI_SSID, WIFI_PSK, HUB_HOST, HUB_PORT,
+    // 3. Initialise WiFiHandler (STA + WS client + register on connect).
+    //    Rotates through NETWORK_PROFILES until one AP links (FW-1 multi-AP).
+    wifiHandler.begin(NETWORK_PROFILES,
+                      sizeof(NETWORK_PROFILES) / sizeof(NETWORK_PROFILES[0]),
                       devId, cs, FW_VERSION);
     wifiHandler.setDownlinkCallback(onDownlink);
 

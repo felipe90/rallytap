@@ -7,23 +7,32 @@
 #include <WebSocketsClient.h>
 #include "WifiBackoff.h"
 
+/// One candidate WiFi AP profile. The handler rotates through the profile
+/// list until one connects; each profile carries its own hub endpoint so a
+/// tap can move between the deploy AP (RallyOS) and a dev/lab AP.
+struct TapNetworkProfile {
+    const char* ssid;
+    const char* psk;        ///< empty string = open network
+    const char* hubHost;
+    uint16_t    hubPort;
+};
+
 /// WiFi STA + thin plain-WebSocket client (FW-1, PROTO-4, WS-3).
 ///
-/// Retires the Phase-1 GATT bridge: connects to the dedicated tap AP,
-/// reconnects with exponential backoff + jitter, and runs the rallytap WS
-/// client with a ping/pong heartbeat. On every (re)connect it re-runs the
-/// rallytap.register handshake (PROTO-1) so the hub re-binds the tap
-/// mid-match. A wrong or unreachable AP terminates in the FATAL phase after
-/// FATAL_TIMEOUT_MS so the tap stops oscillating (E6) — main.cpp renders
-/// "Wrong AP" on the OLED.
+/// Retires the Phase-1 GATT bridge: connects to one of the configured AP
+/// profiles (rotating on failure), reconnects with exponential backoff +
+/// jitter, and runs the rallytap WS client with a ping/pong heartbeat. On
+/// every (re)connect it re-runs the rallytap.register handshake (PROTO-1) so
+/// the hub re-binds the tap mid-match. If no profile can reach its AP within
+/// FATAL_TIMEOUT_MS the tap enters the FATAL phase and stops oscillating
+/// (E6) — main.cpp renders "Wrong AP" on the OLED.
 class WiFiHandler {
 public:
     WiFiHandler();
 
-    /// Configure the AP + hub endpoint and start connecting.
+    /// Configure the AP profiles + hub endpoint and start connecting.
     /// devId/label/fw are reported in the register handshake.
-    void begin(const char* ssid, const char* psk,
-               const char* hubHost, uint16_t hubPort,
+    void begin(const TapNetworkProfile* profiles, size_t profileCount,
                const String& devId, const String& label,
                const char* fw);
 
@@ -47,6 +56,7 @@ public:
     static constexpr unsigned long WS_HEARTBEAT_MS     = 20000;  // WS-3 ping
     static constexpr unsigned long WS_HEARTBEAT_TO_MS  = 3000;   // pong timeout
     static constexpr unsigned long FATAL_TIMEOUT_MS    = 120000; // wrong AP
+    static constexpr unsigned int  PROFILE_ATTEMPTS_PER_PROFILE = 4; // backoff ticks per AP before rotating
 
 private:
     enum class Phase : uint8_t {
@@ -56,13 +66,12 @@ private:
         FATAL           ///< wrong AP — exhausted the fatal timeout
     };
 
-    const char*  _ssid;
-    const char*  _psk;
-    const char*  _hubHost;
-    uint16_t     _hubPort;
-    String       _devId;
-    String       _label;
-    String       _fw;
+    const TapNetworkProfile* _profiles;
+    size_t          _profileCount;
+    size_t          _profileIndex;
+    String          _devId;
+    String          _label;
+    String          _fw;
 
     Phase           _phase;
     unsigned int    _attempt;
@@ -77,6 +86,8 @@ private:
 
     // --- helpers ---
     void startConnectAttempt();
+    void advanceProfile();
+    const TapNetworkProfile& currentProfile() const;
     void initWebSocket();
     void sendRegister();
     void enterFatal();
