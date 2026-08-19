@@ -1,7 +1,6 @@
 #include "DisplayManager.h"
 #include "ScoreManager.h"
 #include "MesaLabels.h"
-#include "RallyOSLogo.h"
 
 // I2C pins for the OLED — board-configurable via build flags.
 // Defaults match the RallyTap-01 board (SDA=21, SCL=22).
@@ -194,17 +193,16 @@ void DisplayManager::render() {
 void DisplayManager::renderBoot() {
     _display.clearDisplay();
 
-    // RallyOS logo mark, centred (128 wide / 64 logo width)
-    _display.drawXBitmap(
-        (128 - RALLYOS_LOGO_WIDTH) / 2, 0,
-        RALLYOS_LOGO_BITS, RALLYOS_LOGO_WIDTH, RALLYOS_LOGO_HEIGHT,
-        SSD1306_WHITE);
-
-    // "RallyTap by RallyOS" centred below the logo (18 chars x 6px = 108px)
-    _display.setTextSize(1);
+    // "RallyTap" bold, centred
+    _display.setTextSize(2);
     _display.setTextColor(SSD1306_WHITE);
-    _display.setCursor((128 - 108) / 2, 48);
-    _display.println("RallyTap by RallyOS");
+    _display.setCursor(16, 18);
+    _display.println("RallyTap");
+
+    // "by RallyOS" below, centred
+    _display.setTextSize(1);
+    _display.setCursor(38, 40);
+    _display.println("by RallyOS");
 
     _display.display();
 }
