@@ -85,6 +85,7 @@ void onDownlink(const String& json) {
         scoreManager.fromJSON(json);
         displayManager.setScore(scoreManager);
         displayManager.setMesaId(doc["mesaId"] | "");
+        displayManager.setCourtName(doc["courtName"] | "");
         displayManager.setState(DisplayManager::State::CONNECTED);
     } else if (strcmp(type, "rallytap.unbound") == 0) {
         // BND-5 — pairing affordance with the 4-char call-sign.
@@ -96,6 +97,7 @@ void onDownlink(const String& json) {
         matchActive = !doc["match"].isNull();
         scoreManager.fromJSON(json);
         displayManager.setScore(scoreManager);
+        displayManager.setCourtName(doc["courtName"] | "");
         if (matchActive) {
             displayManager.setState(DisplayManager::State::CONNECTED);
         } else if (strcmp(doc["score"]["status"] | "FINISHED", "FINISHED") == 0) {
@@ -108,6 +110,7 @@ void onDownlink(const String& json) {
         // MATCH-1 — live score push.
         scoreManager.fromJSON(json);
         displayManager.setScore(scoreManager);
+        displayManager.setCourtName(doc["courtName"] | "");
         if (matchActive) {
             displayManager.setState(DisplayManager::State::CONNECTED);
         }

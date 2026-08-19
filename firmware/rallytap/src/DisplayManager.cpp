@@ -16,6 +16,7 @@ DisplayManager::DisplayManager()
     , _cachedB(0)
     , _cachedMsg("")
     , _mesaId("")
+    , _courtName("")
     , _callSign("")
     , _wrongAp(false)
 {}
@@ -230,7 +231,7 @@ void DisplayManager::renderConnected() {
     _display.setTextSize(1);
     _display.setTextColor(SSD1306_WHITE);
     _display.setCursor(0, 0);
-    _display.println("Mesa " + mesaNumber() + " OK");   // ASCII for ✓ (GFX font)
+    _display.println(mesaLabel() + " OK");   // ASCII for ✓ (GFX font)
 
     if (_score != nullptr) {
         _display.setTextSize(2);
@@ -289,7 +290,7 @@ void DisplayManager::renderReconnecting() {
     _display.setTextSize(1);
     _display.setTextColor(SSD1306_WHITE);
     _display.setCursor(0, 20);
-    _display.println("Mesa " + mesaNumber());          // ASCII for ⚉ (GFX font)
+    _display.println(mesaLabel());          // ASCII for ⚉ (GFX font)
     _display.setCursor(0, 36);
     _display.println("buscando hub");
 
@@ -339,6 +340,12 @@ void DisplayManager::renderSleep() {
 // ===========================================================================
 // Mesa label helpers
 // ===========================================================================
+
+String DisplayManager::mesaLabel() const {
+    if (_courtName.length() > 0) return _courtName;
+    String n = mesaNumber();
+    return n.length() > 0 ? "Mesa " + n : "Mesa";
+}
 
 String DisplayManager::mesaNumber() const {
     // "court-3" -> "3". Falls back to the raw mesaId when there is no

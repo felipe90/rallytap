@@ -51,6 +51,9 @@ public:
     /// Mesa identity (mesaId = court-N from the downlink) for "Mesa N" renders.
     void setMesaId(const String& mesaId) { _mesaId = mesaId; }
 
+    /// Real court display name from the downlink (e.g. "Mesa 1"); empty when absent.
+    void setCourtName(const String& courtName) { _courtName = courtName; }
+
     /// 4-char call-sign for the unbound pairing affordance (BND-5).
     void setCallSign(const String& callSign) { _callSign = callSign; }
 
@@ -80,6 +83,7 @@ private:
 
     // Context for connected / unbound / wrong-AP renders
     String _mesaId;
+    String _courtName;
     String _callSign;
     bool   _wrongAp;
 
@@ -88,6 +92,7 @@ private:
     void render();
     void cacheCurrentScore();
     String mesaNumber() const;
+    String mesaLabel() const;
 
     // Per-state renderers
     void renderBoot();
