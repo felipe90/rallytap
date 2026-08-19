@@ -2,6 +2,15 @@
 #include "ScoreManager.h"
 #include "MesaLabels.h"
 
+// I2C pins for the OLED — board-configurable via build flags.
+// Defaults match the RallyTap-01 board (SDA=21, SCL=22).
+#ifndef OLED_SDA
+#define OLED_SDA 21
+#endif
+#ifndef OLED_SCL
+#define OLED_SCL 22
+#endif
+
 // ---------------------------------------------------------------------------
 // Construction
 // ---------------------------------------------------------------------------
@@ -28,7 +37,7 @@ DisplayManager::DisplayManager()
 
 void DisplayManager::begin() {
     // Initialise I2C with the correct pins
-    Wire.begin(21, 22);   // SDA = GPIO21, SCL = GPIO22
+    Wire.begin(OLED_SDA, OLED_SCL);   // SDA/SCL per board config
 
     // Probe for the OLED at address 0x3C
     Wire.beginTransmission(0x3C);
