@@ -13,6 +13,8 @@ extern void runTests_score();
 extern void runTests_wifiBackoff();
 extern void runTests_buttonHandler();
 extern void runTests_protocolFixture();
+extern void runTests_mesaLabels();
+extern void runTests_networkProfiles();
 
 void setUp(void) {}
 void tearDown(void) {}
@@ -24,6 +26,8 @@ int main(int argc, char** argv) {
     runTests_wifiBackoff();
     runTests_buttonHandler();
     runTests_protocolFixture();
+    runTests_mesaLabels();
+    runTests_networkProfiles();
 
     return UNITY_END();
 }

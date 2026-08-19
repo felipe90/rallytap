@@ -1,5 +1,6 @@
 #include "WiFiHandler.h"
 #include <ArduinoJson.h>
+#include "NetworkProfiles.h"
 
 // Static instance
 WiFiHandler* WiFiHandler::_instance = nullptr;
@@ -72,7 +73,7 @@ void WiFiHandler::loop() {
                     // rotate to the next configured AP (multi-network
                     // fallback: deploy AP -> dev AP). FATAL only after the
                     // global timeout has passed without ANY profile linking.
-                    if (_attempt >= PROFILE_ATTEMPTS_PER_PROFILE) {
+                    if (wifiShouldRotateProfile(_attempt, PROFILE_ATTEMPTS_PER_PROFILE)) {
                         advanceProfile();
                     } else {
                         _attempt++;
@@ -142,7 +143,7 @@ const TapNetworkProfile& WiFiHandler::currentProfile() const {
 }
 
 void WiFiHandler::advanceProfile() {
-    _profileIndex = (_profileIndex + 1) % _profileCount;
+    _profileIndex = wifiNextProfileIndex(_profileIndex, _profileCount);
     _attempt      = 0;
     _phaseStartMs = millis();
 }

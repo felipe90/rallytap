@@ -1,5 +1,6 @@
 #include "DisplayManager.h"
 #include "ScoreManager.h"
+#include "MesaLabels.h"
 
 // ---------------------------------------------------------------------------
 // Construction
@@ -342,20 +343,11 @@ void DisplayManager::renderSleep() {
 // ===========================================================================
 
 String DisplayManager::mesaLabel() const {
-    if (_courtName.length() > 0) return _courtName;
-    String n = mesaNumber();
-    return n.length() > 0 ? "Mesa " + n : "Mesa";
+    // Pure logic in MesaLabels.h (host-tested in test_mesa_label.cpp).
+    return mesaLabelFor(_courtName, _mesaId);
 }
 
 String DisplayManager::mesaNumber() const {
-    // "court-3" -> "3". Falls back to the raw mesaId when there is no
-    // trailing digit sequence (e.g. empty or a label without a number).
-    const size_t len = _mesaId.length();
-    for (size_t i = len; i > 0; i--) {
-        char c = _mesaId[i - 1];
-        if (c >= '0' && c <= '9') continue;
-        if (i == len) return "";                 // no trailing digits
-        return _mesaId.substring(i, len);        // digits run [i, len)
-    }
-    return _mesaId;
+    // Pure logic in MesaLabels.h (host-tested in test_mesa_label.cpp).
+    return mesaNumberFor(_mesaId);
 }
