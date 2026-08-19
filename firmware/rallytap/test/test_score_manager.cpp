@@ -18,12 +18,10 @@
 
 static ScoreManager sm;
 
-void setUp(void) {
-    // Reset to defaults before each test
-    sm = ScoreManager();
-}
+void runTests_score(void);   // registered by test_main.cpp
 
-void tearDown(void) {}
+// Unity's setUp/tearDown live in test_main.cpp; reset here per test.
+static void resetScore() { sm = ScoreManager(); }
 
 // ---------------------------------------------------------------------------
 // fromJSON() — valid payload
@@ -139,7 +137,42 @@ void test_formatDisplay_output(void) {
 
     String display = sm.formatDisplay();
 
-    TEST_ASSERT_EQUAL_STRING("A:3 B:2", display.c_str());
+    TEST_ASSERT_EQUAL_STRING("3\n2", display.c_str());
+}
+
+void test_formatDisplay_two_lines_with_names(void) {
+    const char* json = "{"
+        "\"leftName\":\"Juan\",\"rightName\":\"Pedro\","
+        "\"score\":{\"a\":5,\"b\":3,\"set_a\":0,\"set_b\":0,\"status\":\"LIVE\",\"msg\":\"\"}"
+        "}";
+
+    TEST_ASSERT_TRUE_MESSAGE(sm.fromJSON(json), "bind/match payload should parse");
+
+    TEST_ASSERT_EQUAL_STRING("Juan",  sm.getLeftName().c_str());
+    TEST_ASSERT_EQUAL_STRING("Pedro", sm.getRightName().c_str());
+    TEST_ASSERT_EQUAL_STRING("Juan 5\nPedro 3", sm.formatDisplay().c_str());
+}
+
+void test_formatDisplay_hub_swapped_names_rendered_as_is(void) {
+    // CONF-3 — the hub side-maps the names (after SWAP_SIDES / set-end). The
+    // tap must render exactly what it receives, with NO swap logic of its own.
+    const char* json = "{"
+        "\"leftName\":\"Pedro\",\"rightName\":\"Juan\","
+        "\"score\":{\"a\":5,\"b\":3,\"set_a\":0,\"set_b\":0,\"status\":\"LIVE\",\"msg\":\"\"}"
+        "}";
+
+    TEST_ASSERT_TRUE_MESSAGE(sm.fromJSON(json), "swapped payload should parse");
+
+    TEST_ASSERT_EQUAL_STRING("Pedro", sm.getLeftName().c_str());
+    TEST_ASSERT_EQUAL_STRING("Juan",  sm.getRightName().c_str());
+    TEST_ASSERT_EQUAL_STRING("Pedro 5\nJuan 3", sm.formatDisplay().c_str());
+}
+
+void test_formatDisplay_names_default_empty(void) {
+    sm.fromJSON("{\"a\":1,\"b\":1}");
+
+    TEST_ASSERT_EQUAL_STRING("", sm.getLeftName().c_str());
+    TEST_ASSERT_EQUAL_STRING("", sm.getRightName().c_str());
 }
 
 // ---------------------------------------------------------------------------
@@ -165,21 +198,20 @@ void test_getters_after_parsing(void) {
 }
 
 // ---------------------------------------------------------------------------
-// Runner
+// Runner — registered from test_main.cpp
 // ---------------------------------------------------------------------------
 
-int main(int argc, char** argv) {
-    UNITY_BEGIN();
-
-    RUN_TEST(test_fromJSON_valid_score);
-    RUN_TEST(test_fromJSON_malformed_returns_false);
-    RUN_TEST(test_fromJSON_empty_returns_false);
-    RUN_TEST(test_fromJSON_partial_fields_default_values);
-    RUN_TEST(test_fromJSON_extra_fields_ignored);
-    RUN_TEST(test_fromJSON_status_error);
-    RUN_TEST(test_fromJSON_msg_field);
-    RUN_TEST(test_formatDisplay_output);
-    RUN_TEST(test_getters_after_parsing);
-
-    return UNITY_END();
+void runTests_score(void) {
+    resetScore(); RUN_TEST(test_fromJSON_valid_score);
+    resetScore(); RUN_TEST(test_fromJSON_malformed_returns_false);
+    resetScore(); RUN_TEST(test_fromJSON_empty_returns_false);
+    resetScore(); RUN_TEST(test_fromJSON_partial_fields_default_values);
+    resetScore(); RUN_TEST(test_fromJSON_extra_fields_ignored);
+    resetScore(); RUN_TEST(test_fromJSON_status_error);
+    resetScore(); RUN_TEST(test_fromJSON_msg_field);
+    resetScore(); RUN_TEST(test_formatDisplay_output);
+    resetScore(); RUN_TEST(test_formatDisplay_two_lines_with_names);
+    resetScore(); RUN_TEST(test_formatDisplay_hub_swapped_names_rendered_as_is);
+    resetScore(); RUN_TEST(test_formatDisplay_names_default_empty);
+    resetScore(); RUN_TEST(test_getters_after_parsing);
 }

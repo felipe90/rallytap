@@ -10,16 +10,23 @@ class ScoreManager;   // forward declaration
 
 class DisplayManager {
 public:
-    /// OLED state machine states (7 states)
+    /// OLED state machine states
     enum class State : uint8_t {
-        BOOT,          ///< "RallyTap-01" centered, 2s auto-advance → IDLE
-        IDLE,          ///< "Conectando..."
-        CONNECTED,     ///< "A:{a} B:{b}"
+        BOOT,          ///< "RallyTap-01" centered, 2s auto-advance → CONNECTING
+        IDLE,          ///< legacy "Conectando..." (superseded by CONNECTING)
+        CONNECTING,    ///< waiting for the AP; "Wrong AP" after the fatal timeout (FW-1/E6)
+        CONNECTED,     ///< "Mesa N ✓" + names + score (FW-2/FW-3)
         PRESSING,      ///< Flash inverted 100ms → CONNECTED
         CONFIRMING,    ///< "{score} OK" 1.5s → CONNECTED
         ERROR,         ///< "{score} X {msg}" until next state change
-        RECONNECTING   ///< "Reconectando..."
+        RECONNECTING,  ///< "Mesa N ⚉ buscando hub" (FW-3)
+        UNBOUND,       ///< pairing affordance "Pair me <call-sign>" (BND-5)
+        FINISHED,      ///< "Fin: 3–2" + "new match from mobile" (MATCH-2)
+        SLEEP          ///< display off after inactivity; wake on any activity (E13/E15)
     };
+
+    /// Connected-state inactivity timeout before falling to SLEEP (E13).
+    static constexpr unsigned long SLEEP_TIMEOUT_MS = 60000;
 
     DisplayManager();
 
@@ -34,9 +41,27 @@ public:
     /// Transition the state machine to a new state and re-render.
     void setState(State newState);
 
-    /// Called every loop(); handles timed auto-advances
-    /// (BOOT→IDLE, PRESSING→CONNECTED, CONFIRMING→CONNECTED).
+    /// Called every loop(); handles timed auto-advances and idle→SLEEP.
     void tick();
+
+    /// Wake the display from SLEEP (button press or incoming frame, E13/E15).
+    /// No-op when not sleeping.
+    void wake();
+
+    /// Mesa identity (mesaId = court-N from the downlink) for "Mesa N" renders.
+    void setMesaId(const String& mesaId) { _mesaId = mesaId; }
+
+    /// Real court display name from the downlink (e.g. "Mesa 1"); empty when absent.
+    void setCourtName(const String& courtName) { _courtName = courtName; }
+
+    /// 4-char call-sign for the unbound pairing affordance (BND-5).
+    void setCallSign(const String& callSign) { _callSign = callSign; }
+
+    /// Mark the wrong-AP fatal condition (rendered by CONNECTING, E6).
+    void setWrongAp(bool wrongAp) { _wrongAp = wrongAp; }
+
+    /// Current state (main uses it to decide wake targets).
+    State state() const { return _state; }
 
     /// Whether an OLED was detected and is usable.
     bool isDisplayAvailable() const { return _displayAvailable; }
@@ -56,19 +81,31 @@ private:
     int    _cachedB;
     String _cachedMsg;
 
+    // Context for connected / unbound / wrong-AP renders
+    String _mesaId;
+    String _courtName;
+    String _callSign;
+    bool   _wrongAp;
+
     // --- helpers ---
     void transitionTo(State s);
     void render();
     void cacheCurrentScore();
+    String mesaNumber() const;
+    String mesaLabel() const;
 
     // Per-state renderers
     void renderBoot();
     void renderIdle();
+    void renderConnecting();
     void renderConnected();
     void renderPressing();
     void renderConfirming();
     void renderError();
     void renderReconnecting();
+    void renderUnbound();
+    void renderFinished();
+    void renderSleep();
 };
 
 #endif // DISPLAY_MANAGER_H

@@ -1,21 +1,44 @@
 /**
- * RallyTap Phase 1 — Firmware Orchestrator
+ * RallyTap Phase 2 — Firmware Orchestrator (WiFi-Direct)
  *
  * ESP32-WROOM-32 / Arduino Framework
  *
+ * The tap is a dumb WS client: devId + buttons + OLED (FW). The hub owns
+ * binding, score authority, and the E18 priority rule. The phone-bridge
+ * path is retired (REM-2).
+ *
  * Data flow (one loop iteration):
- *   1. Poll buttons → on press: BLE notify + display PRESSING
- *   2. Check BLE connection state → update display (CONNECTED / RECONNECTING)
- *   3. Process pending score writes → update ScoreManager + display state
- *   4. Tick the display state machine (timed auto-advances)
+ *   1. Drive WiFiHandler (AP connect/reconnect + WS client + register)
+ *   2. Dispatch downlinks (bind/unbound/match/score) to ScoreManager/DisplayManager
+ *   3. Poll buttons — enqueue {devId,button} presses when a match is active
+ *   4. Flush the press FIFO over the WS (live + on reconnect, AC2)
+ *   5. Tick the display state machine (auto-advances + idle → SLEEP)
  */
 
 #include <Arduino.h>
+#include <esp_system.h>
 
 #include "ScoreManager.h"
 #include "ButtonHandler.h"
-#include "BLEHandler.h"
+#include "WiFiHandler.h"
 #include "DisplayManager.h"
+
+// ===========================================================================
+// Installation configuration (hardcoded at install — SoftAP provisioning is
+// Phase 2.1). Multi-profile: the tap rotates APs until one connects. The
+// deploy profile joins the hub's existing open AP (`RallyOS`, wpa=0) instead
+// of a dedicated tap SSID (AC-4 relaxed by user decision); the dev profile
+// is the lab/local AP used for hardware-in-the-loop on the dev machine.
+// ===========================================================================
+
+static const TapNetworkProfile NETWORK_PROFILES[] = {
+    // Deploy — hub's open AP (setup-orangepi-ap.sh: AP_SSID=RallyOS, wpa=0)
+    { "RallyOS", "", "192.168.4.1", 3001 },
+    // Dev / HIL — local AP on the dev machine's LAN
+    { "TIMELINE-56", "Eraso1648", "192.168.20.57", 3001 },
+};
+
+static const char* FW_VERSION  = "2.0.0";           // reported in register
 
 // ===========================================================================
 // Global instances
@@ -23,27 +46,76 @@
 
 ScoreManager    scoreManager;
 ButtonHandler   buttonHandler;
-BLEHandler      bleHandler;
+WiFiHandler     wifiHandler;
 DisplayManager  displayManager;
 
+static bool matchActive = false;   // true while the bound court has an active match
+
 // ===========================================================================
-// BLE score-write bridge
+// Call-sign (BND-5: 4 chars from the MAC; the full MAC is never shown)
+// ===========================================================================
+
+static String callSign() {
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    char cs[5];
+    snprintf(cs, sizeof(cs), "%02X%02X", mac[4], mac[5]);
+    return String(cs);
+}
+
+// ===========================================================================
+// Downlink dispatch (hub -> tap)
 //
-// The BLE callback runs in a FreeRTOS task context (not the main loop).
-// We use a volatile flag + a small buffer to safely hand data to loop().
+// Runs from loop() via the WiFiHandler callback. Any incoming frame wakes the
+// display (E13). The tap renders exactly what it receives — NO swap logic
+// (CONF-3).
 // ===========================================================================
 
-static volatile bool  pendingScoreUpdate = false;
-static uint8_t        pendingScoreBuf[128];
-static size_t         pendingScoreLen   = 0;
-
-void onScoreWrite(const uint8_t* data, size_t len) {
-    if (len > sizeof(pendingScoreBuf)) {
-        len = sizeof(pendingScoreBuf);
+void onDownlink(const String& json) {
+    StaticJsonDocument<512> doc;
+    if (deserializeJson(doc, json)) {
+        return;
     }
-    memcpy(pendingScoreBuf, data, len);
-    pendingScoreLen   = len;
-    pendingScoreUpdate = true;
+
+    const char* type = doc["type"] | "";
+
+    if (strcmp(type, "rallytap.bind") == 0) {
+        // PROTO-1 — register reply carrying the live match state.
+        matchActive = !doc["match"].isNull();
+        scoreManager.fromJSON(json);
+        displayManager.setScore(scoreManager);
+        displayManager.setMesaId(doc["mesaId"] | "");
+        displayManager.setCourtName(doc["courtName"] | "");
+        displayManager.setState(DisplayManager::State::CONNECTED);
+    } else if (strcmp(type, "rallytap.unbound") == 0) {
+        // BND-5 — pairing affordance with the 4-char call-sign.
+        matchActive = false;
+        displayManager.setCallSign(callSign());
+        displayManager.setState(DisplayManager::State::UNBOUND);
+    } else if (strcmp(type, "rallytap.match") == 0) {
+        // MATCH-1 — lifecycle push (start / end / state change).
+        matchActive = !doc["match"].isNull();
+        scoreManager.fromJSON(json);
+        displayManager.setScore(scoreManager);
+        displayManager.setCourtName(doc["courtName"] | "");
+        if (matchActive) {
+            displayManager.setState(DisplayManager::State::CONNECTED);
+        } else if (strcmp(doc["score"]["status"] | "FINISHED", "FINISHED") == 0) {
+            // MATCH-2 — the tap follows the match engine, not club flow state.
+            displayManager.setState(DisplayManager::State::FINISHED);
+        } else {
+            displayManager.setState(DisplayManager::State::CONNECTED);
+        }
+    } else if (strcmp(type, "rallytap.score") == 0) {
+        // MATCH-1 — live score push.
+        scoreManager.fromJSON(json);
+        displayManager.setScore(scoreManager);
+        displayManager.setCourtName(doc["courtName"] | "");
+        if (matchActive) {
+            displayManager.setState(DisplayManager::State::CONNECTED);
+        }
+    }
+    // Unknown frames are ignored.
 }
 
 // ===========================================================================
@@ -54,21 +126,29 @@ void setup() {
     Serial.begin(115200);
     delay(200);                     // give Serial time to settle
     Serial.println();
-    Serial.println("=== RallyTap-01 ===");
+    Serial.println("=== RallyTap-01 (WiFi-Direct) ===");
 
-    // 1. Initialise display (enters BOOT state)
+    // 1. Initialise display (enters BOOT state; auto-advances to CONNECTING)
     displayManager.begin();
     displayManager.setState(DisplayManager::State::BOOT);
     displayManager.setScore(scoreManager);
 
-    // 2. Initialise button handler
+    // 2. Initialise button handler + tap identity
     buttonHandler.begin(18, 19);    // GPIO18 = A, GPIO19 = B
+    String cs    = callSign();
+    String devId = String("dev-tap-") + cs;
+    buttonHandler.setDevId(devId);
+    displayManager.setCallSign(cs);
 
-    // 3. Initialise BLE handler & register score-write callback
-    bleHandler.begin();
-    bleHandler.setScoreWriteCallback(onScoreWrite);
+    // 3. Initialise WiFiHandler (STA + WS client + register on connect).
+    //    Rotates through NETWORK_PROFILES until one AP links (FW-1 multi-AP).
+    wifiHandler.begin(NETWORK_PROFILES,
+                      sizeof(NETWORK_PROFILES) / sizeof(NETWORK_PROFILES[0]),
+                      devId, cs, FW_VERSION);
+    wifiHandler.setDownlinkCallback(onDownlink);
 
-    Serial.println("[main] RallyTap-01 ready");
+    Serial.print("[main] RallyTap-01 ready — devId ");
+    Serial.println(devId);
 }
 
 // ===========================================================================
@@ -76,72 +156,62 @@ void setup() {
 // ===========================================================================
 
 void loop() {
-    static bool wasConnected = false;
+    static bool wasWsConnected = false;
+    static bool wasFatal       = false;
 
     // ---------------------------------------------------------------
-    // 1. Poll buttons
+    // 1. WiFi / WS lifecycle (connect, backoff, heartbeat, re-register)
+    // ---------------------------------------------------------------
+    wifiHandler.loop();
+
+    // ---------------------------------------------------------------
+    // 2. Fatal wrong-AP — freeze CONNECTING on "Wrong AP" (FW-1/E6)
+    // ---------------------------------------------------------------
+    if (wifiHandler.isFatal()) {
+        if (!wasFatal) {
+            displayManager.setWrongAp(true);
+            displayManager.setState(DisplayManager::State::CONNECTING);
+            wasFatal = true;
+        }
+    } else {
+        bool wsConnected = wifiHandler.isConnected();
+        if (!wsConnected && wasWsConnected) {
+            Serial.println("[main] WS dropped — entering reconnect");
+            displayManager.setState(DisplayManager::State::RECONNECTING);
+        }
+        wasWsConnected = wsConnected;
+    }
+
+    // ---------------------------------------------------------------
+    // 3. Buttons — wake, and enqueue {devId,button} only for an active match
     // ---------------------------------------------------------------
     PressResult press = buttonHandler.poll();
-
-    if (press == PressResult::A) {
-        Serial.println("[main] Button A pressed");
-        bleHandler.notifyButtonPress(0x01);         // 0x01 = Player A
-        displayManager.setState(DisplayManager::State::PRESSING);
-    } else if (press == PressResult::B) {
-        Serial.println("[main] Button B pressed");
-        bleHandler.notifyButtonPress(0x02);         // 0x02 = Player B
-        displayManager.setState(DisplayManager::State::PRESSING);
-    }
-
-    // ---------------------------------------------------------------
-    // 2. BLE connection state tracking
-    // ---------------------------------------------------------------
-    bool connected = bleHandler.isConnected();
-
-    if (connected && !wasConnected) {
-        // Just connected
-        Serial.println("[main] BLE connected");
-        displayManager.setState(DisplayManager::State::CONNECTED);
-    } else if (!connected && wasConnected) {
-        // Just disconnected
-        Serial.println("[main] BLE disconnected — entering reconnect");
-        displayManager.setState(DisplayManager::State::RECONNECTING);
-        // Advertising is already restarted by BLEHandler::onDisconnect,
-        // but an explicit call ensures it runs immediately:
-        bleHandler.startAdvertising();
-    }
-    wasConnected = connected;
-
-    // ---------------------------------------------------------------
-    // 3. Process pending score writes (from BLE score_display)
-    // ---------------------------------------------------------------
-    if (pendingScoreUpdate) {
-        pendingScoreUpdate = false;                 // consume the flag
-
-        String json(reinterpret_cast<char*>(pendingScoreBuf),
-                    pendingScoreLen);
-
-        Serial.print("[main] Score write: ");
-        Serial.println(json);
-
-        if (scoreManager.fromJSON(json)) {
-            // Valid JSON — update display
-            displayManager.setScore(scoreManager);
-
-            if (scoreManager.getStatus() == "error") {
-                displayManager.setState(DisplayManager::State::ERROR);
-            } else {
-                displayManager.setState(DisplayManager::State::CONFIRMING);
-            }
+    if (press == PressResult::A || press == PressResult::B) {
+        if (matchActive) {
+            buttonHandler.enqueue(press);
+            displayManager.setState(DisplayManager::State::PRESSING);
+        } else {
+            // E15 — press during SLEEP / no active match: wake, no-op.
+            displayManager.wake();
+            displayManager.setState(DisplayManager::State::CONNECTED);
         }
-        // Invalid JSON: silently ignored (per R3 spec)
     }
 
     // ---------------------------------------------------------------
-    // 4. Tick the display state machine (timed transitions)
+    // 4. Flush buffered presses over the WS (live + on reconnect, AC2)
+    // ---------------------------------------------------------------
+    if (wifiHandler.isConnected()) {
+        String evt;
+        while (buttonHandler.dequeue(evt)) {
+            wifiHandler.send(evt);
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // 5. Tick the display state machine (auto-advances + idle -> SLEEP)
     // ---------------------------------------------------------------
     displayManager.tick();
 
-    // Small yield for watchdog / BLE background tasks
+    // Small yield for WiFi/WS background tasks
     delay(5);
 }

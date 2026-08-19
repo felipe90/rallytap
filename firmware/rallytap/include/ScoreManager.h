@@ -19,6 +19,8 @@ public:
     int  getSetB()  const { return _set_b; }
     const String& getStatus() const { return _status; }
     const String& getMsg()    const { return _msg; }
+    const String& getLeftName()  const { return _leftName; }
+    const String& getRightName() const { return _rightName; }
 
 private:
     int     _a;
@@ -27,6 +29,8 @@ private:
     int     _set_b;
     String  _status;
     String  _msg;
+    String  _leftName;    // side-mapped by the hub — render as-is (CONF-3)
+    String  _rightName;
 };
 
 #endif // SCORE_MANAGER_H
