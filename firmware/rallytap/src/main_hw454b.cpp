@@ -172,6 +172,7 @@ void setup() {
                       sizeof(NETWORK_PROFILES) / sizeof(NETWORK_PROFILES[0]),
                       devId, cs, FW_VERSION);
     wifiHandler.setDownlinkCallback(onDownlink);
+    displayManager.setWifiHandler(&wifiHandler);   // CONNECTING phase line (REQ-FB-4)
 
     Serial.print("[main] RallyTap-HW454B ready — devId ");
     Serial.println(devId);
