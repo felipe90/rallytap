@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: Build firmware
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [esp32dev, hw454b]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up PlatformIO Core
+        uses: platformio/platformio-action@v1
+        with:
+          core-version: latest
+      - name: Build ${{ matrix.env }}
+        run: pio run -e ${{ matrix.env }}
+        working-directory: firmware/rallytap
+
+  test-native:
+    name: Host unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up PlatformIO Core
+        uses: platformio/platformio-action@v1
+        with:
+          core-version: latest
+      - name: Run native tests
+        run: pio test -e native
+        working-directory: firmware/rallytap
+
+  diff-size:
+    name: Diff size guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Count added lines vs base
+        id: count
+        run: |
+          BASE="${{ github.event.pull_request.base.sha || github.event.before }}"
+          ADDED=$(git diff --numstat "$BASE...HEAD" 2>/dev/null | awk '{s+=$1} END {print s+0}')
+          echo "added=$ADDED"
+          echo "added=$ADDED" >> "$GITHUB_OUTPUT"
+      - name: Warn on oversized PR
+        if: steps.count.outputs.added > 800
+        run: |
+          echo "::warning::PR adds ${{ steps.count.outputs.added }} lines (>800). Consider splitting into smaller reviewable PRs (chained/stacked)."
