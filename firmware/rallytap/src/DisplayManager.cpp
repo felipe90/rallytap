@@ -1,6 +1,8 @@
 #include "DisplayManager.h"
 #include "ScoreManager.h"
 #include "MesaLabels.h"
+#include "OledText.h"
+#include "WiFiHandler.h"
 
 // I2C pins for the OLED — board-configurable via build flags.
 // Defaults match the RallyTap-01 board (SDA=21, SCL=22).
@@ -29,6 +31,9 @@ DisplayManager::DisplayManager()
     , _courtName("")
     , _callSign("")
     , _wrongAp(false)
+    , _matchActive(false)
+    , _wifi(nullptr)
+    , _apUpLast(false)
 {}
 
 // ---------------------------------------------------------------------------
@@ -119,8 +124,26 @@ void DisplayManager::tick() {
             }
             break;
 
+        case State::CONNECTING: {
+            // Edge re-render when the AP link flips (D4) so the phase line
+            // ("Conectando..." → "Conectando hub...") stays observable.
+            bool apUp = _wifi != nullptr && _wifi->isApUp();
+            if (apUp != _apUpLast) {
+                _apUpLast = apUp;
+                render();
+            }
+            break;
+        }
+
+        case State::SESSION_END:
+            // REQ-FB-5 — short dwell, then fall to the pairing affordance.
+            if (elapsed >= SESSION_END_TIMEOUT_MS) {
+                transitionTo(State::UNBOUND);
+            }
+            break;
+
         default:
-            // CONNECTING, IDLE, ERROR, SLEEP — no auto-advance.
+            // IDLE, ERROR, SLEEP — no auto-advance.
             break;
     }
 }
@@ -182,6 +205,7 @@ void DisplayManager::render() {
         case State::RECONNECTING:  renderReconnecting();  break;
         case State::UNBOUND:       renderUnbound();       break;
         case State::FINISHED:      renderFinished();      break;
+        case State::SESSION_END:   renderSessionEnd();    break;
         case State::SLEEP:         renderSleep();         break;
     }
 }
@@ -230,6 +254,10 @@ void DisplayManager::renderConnecting() {
         _display.println("Wrong AP");
         _display.setCursor(0, 36);
         _display.println("check network");
+    } else if (_wifi != nullptr && _wifi->isApUp()) {
+        // AP linked, WS still (re)connecting (REQ-FB-4).
+        _display.setCursor(0, 28);
+        _display.println("Conectando hub...");
     } else {
         _display.setCursor(0, 28);
         _display.println("Conectando...");
@@ -246,10 +274,27 @@ void DisplayManager::renderConnected() {
     _display.setCursor(0, 0);
     _display.println(mesaLabel() + " OK");   // ASCII for ✓ (GFX font)
 
-    if (_score != nullptr) {
+    if (_matchActive && _score != nullptr) {
+        // REQ-FB-3 — truncated size-1 names, then the size-2 score block.
+        String left  = truncateForOled(_score->getLeftName());
+        String right = truncateForOled(_score->getRightName());
+        if (left.length() > 0) {
+            _display.setCursor(0, 12);
+            _display.println(left);
+        }
+        if (right.length() > 0) {
+            _display.setCursor(0, 24);
+            _display.println(right);
+        }
         _display.setTextSize(2);
-        _display.setCursor(0, 18);
-        _display.println(_score->formatDisplay());
+        _display.setCursor(0, 42);
+        _display.print(String(_score->getA()));
+        _display.print("-");
+        _display.println(String(_score->getB()));
+    } else {
+        // Bound but no active match (OQ-1) — short size-1 hint line.
+        _display.setCursor(0, 28);
+        _display.println("esperando partido");
     }
 
     _display.display();
@@ -288,11 +333,8 @@ void DisplayManager::renderError() {
     _display.println(" X");
 
     _display.setCursor(0, 28);
-    // Truncate msg to ~20 chars so it fits on one line
-    String msg = _cachedMsg.length() > 20
-        ? _cachedMsg.substring(0, 20) + "..."
-        : _cachedMsg;
-    _display.println(msg);
+    // Reuse the shared OLED line truncation (REQ-FB-2).
+    _display.println(truncateForOled(_cachedMsg));
 
     _display.display();
 }
@@ -339,6 +381,19 @@ void DisplayManager::renderFinished() {
     _display.setTextSize(1);
     _display.setCursor(0, 44);
     _display.println("new match from mobile");         // MATCH-2
+
+    _display.display();
+}
+
+void DisplayManager::renderSessionEnd() {
+    _display.clearDisplay();
+
+    _display.setTextSize(1);
+    _display.setTextColor(SSD1306_WHITE);
+    _display.setCursor(0, 20);
+    _display.println("Sesion finalizada");   // ASCII — GFX font has no accents
+    _display.setCursor(0, 36);
+    _display.println("pair from mobile");
 
     _display.display();
 }

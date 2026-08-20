@@ -88,31 +88,53 @@ void onDownlink(const String& json) {
         displayManager.setScore(scoreManager);
         displayManager.setMesaId(doc["mesaId"] | "");
         displayManager.setCourtName(doc["courtName"] | "");
+        displayManager.setMatchActive(matchActive);
         displayManager.setState(DisplayManager::State::CONNECTED);
     } else if (strcmp(type, "rallytap.unbound") == 0) {
         // BND-5 — pairing affordance with the 4-char call-sign.
+        // Defensive routing (b, D1): the hub never sends unbound to a bound
+        // tap today, but if one arrives mid-match / on FINISHED, show the
+        // session end before the pairing screen (forward-safe).
+        bool wasActive = matchActive;
         matchActive = false;
+        displayManager.setMatchActive(false);
         displayManager.setCallSign(callSign());
-        displayManager.setState(DisplayManager::State::UNBOUND);
+        if (wasActive || displayManager.state() == DisplayManager::State::FINISHED) {
+            displayManager.setState(DisplayManager::State::SESSION_END);
+        } else {
+            displayManager.setState(DisplayManager::State::UNBOUND);
+        }
     } else if (strcmp(type, "rallytap.match") == 0) {
         // MATCH-1 — lifecycle push (start / end / state change).
-        matchActive = !doc["match"].isNull();
-        scoreManager.fromJSON(json);
-        displayManager.setScore(scoreManager);
-        displayManager.setCourtName(doc["courtName"] | "");
-        if (matchActive) {
-            displayManager.setState(DisplayManager::State::CONNECTED);
-        } else if (strcmp(doc["score"]["status"] | "FINISHED", "FINISHED") == 0) {
-            // MATCH-2 — the tap follows the match engine, not club flow state.
-            displayManager.setState(DisplayManager::State::FINISHED);
+        // Forward-compat hook (D1/REQ-FB-5): a session end arrives as
+        // match:null + reason:"session-end" (REQ-FB-6, hub side). Checked
+        // BEFORE the FINISHED test — the payload is otherwise identical.
+        const char* reason = doc["reason"] | "";
+        if (strcmp(reason, "session-end") == 0) {
+            matchActive = false;
+            displayManager.setMatchActive(false);
+            displayManager.setState(DisplayManager::State::SESSION_END);
         } else {
-            displayManager.setState(DisplayManager::State::CONNECTED);
+            matchActive = !doc["match"].isNull();
+            scoreManager.fromJSON(json);
+            displayManager.setScore(scoreManager);
+            displayManager.setCourtName(doc["courtName"] | "");
+            displayManager.setMatchActive(matchActive);
+            if (matchActive) {
+                displayManager.setState(DisplayManager::State::CONNECTED);
+            } else if (strcmp(doc["score"]["status"] | "FINISHED", "FINISHED") == 0) {
+                // MATCH-2 — the tap follows the match engine, not club flow state.
+                displayManager.setState(DisplayManager::State::FINISHED);
+            } else {
+                displayManager.setState(DisplayManager::State::CONNECTED);
+            }
         }
     } else if (strcmp(type, "rallytap.score") == 0) {
         // MATCH-1 — live score push.
         scoreManager.fromJSON(json);
         displayManager.setScore(scoreManager);
         displayManager.setCourtName(doc["courtName"] | "");
+        displayManager.setMatchActive(matchActive);
         if (matchActive) {
             displayManager.setState(DisplayManager::State::CONNECTED);
         }

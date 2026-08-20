@@ -15,6 +15,7 @@ extern void runTests_buttonHandler();
 extern void runTests_protocolFixture();
 extern void runTests_mesaLabels();
 extern void runTests_networkProfiles();
+extern void runTests_oledText();
 
 void setUp(void) {}
 void tearDown(void) {}
@@ -27,7 +28,8 @@ int main(int argc, char** argv) {
     runTests_buttonHandler();
     runTests_protocolFixture();
     runTests_mesaLabels();
-    runTests_networkProfiles();
+runTests_networkProfiles();
+    runTests_oledText();
 
     return UNITY_END();
 }
