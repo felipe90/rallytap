@@ -1,11 +1,16 @@
 /**
- * RallyTap Phase 2 — Firmware Orchestrator (WiFi-Direct)
+ * RallyTap HW-454B — Firmware Orchestrator (WiFi-Direct)
  *
- * ESP32-WROOM-32 / Arduino Framework
+ * ESP32-WROOM-32 (HW-454B board, CH340) / Arduino Framework
+ *
+ * Board-specific entry point for the HW-454B: ESP32 with a built-in
+ * SSD1306 128x64 OLED. Shares all managers (WiFiHandler, ScoreManager,
+ * DisplayManager, ButtonHandler) with the RallyTap-01 build — only the
+ * pins and identity differ. The OLED I2C pins come from build flags
+ * (OLED_SDA/OLED_SCL) set in [env:hw454b]; button GPIOs are below.
  *
  * The tap is a dumb WS client: devId + buttons + OLED (FW). The hub owns
- * binding, score authority, and the E18 priority rule. The phone-bridge
- * path is retired (REM-2).
+ * binding, score authority, and the E18 priority rule.
  *
  * Data flow (one loop iteration):
  *   1. Drive WiFiHandler (AP connect/reconnect + WS client + register)
@@ -25,18 +30,17 @@
 
 // ===========================================================================
 // Installation configuration (hardcoded at install — SoftAP provisioning is
-// Phase 2.1). Multi-profile: the tap rotates APs until one connects. The
-// deploy profile joins the hub's existing open AP (`RallyOS`, wpa=0) instead
-// of a dedicated tap SSID (AC-4 relaxed by user decision); the dev profile
-// is the lab/local AP used for hardware-in-the-loop on the dev machine.
+// Phase 2.1). Multi-profile: the tap rotates APs until one connects.
 // ===========================================================================
 
 static const TapNetworkProfile NETWORK_PROFILES[] = {
     // Deploy — hub's open AP (setup-orangepi-ap.sh: AP_SSID=RallyOS, wpa=0)
     { "RallyOS", "", "192.168.4.1", 3001 },
+    // Dev / HIL — local AP on the dev machine's LAN
+    { "TIMELINE-56", "Eraso1648", "192.168.20.57", 3001 },
 };
 
-static const char* FW_VERSION  = "2.0.0";           // reported in register
+static const char* FW_VERSION  = "2.0.0-hw454b";   // reported in register
 
 // ===========================================================================
 // Global instances
@@ -146,14 +150,17 @@ void setup() {
     Serial.begin(115200);
     delay(200);                     // give Serial time to settle
     Serial.println();
-    Serial.println("=== RallyTap-01 (WiFi-Direct) ===");
+    Serial.println("=== RallyTap-HW454B (WiFi-Direct) ===");
 
-    // 1. Initialise display (enters BOOT state; auto-advances to CONNECTING)
+    // 1. Initialise display (enters BOOT state; auto-advances to CONNECTING).
+    //    I2C pins come from build flags (OLED_SDA / OLED_SCL).
     displayManager.begin();
     displayManager.setState(DisplayManager::State::BOOT);
     displayManager.setScore(scoreManager);
 
-    // 2. Initialise button handler + tap identity
+    // 2. Initialise button handler + tap identity.
+    //    HW-454B has no built-in buttons — wire two external push buttons to
+    //    GPIO18 (A) and GPIO19 (B), same pins as the RallyTap-01 board.
     buttonHandler.begin(18, 19);    // GPIO18 = A, GPIO19 = B
     String cs    = callSign();
     String devId = String("dev-tap-") + cs;
@@ -161,14 +168,13 @@ void setup() {
     displayManager.setCallSign(cs);
 
     // 3. Initialise WiFiHandler (STA + WS client + register on connect).
-    //    Rotates through NETWORK_PROFILES until one AP links (FW-1 multi-AP).
     wifiHandler.begin(NETWORK_PROFILES,
                       sizeof(NETWORK_PROFILES) / sizeof(NETWORK_PROFILES[0]),
                       devId, cs, FW_VERSION);
     wifiHandler.setDownlinkCallback(onDownlink);
     displayManager.setWifiHandler(&wifiHandler);   // CONNECTING phase line (REQ-FB-4)
 
-    Serial.print("[main] RallyTap-01 ready — devId ");
+    Serial.print("[main] RallyTap-HW454B ready — devId ");
     Serial.println(devId);
 }
 

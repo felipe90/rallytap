@@ -7,6 +7,7 @@
 #include <Adafruit_SSD1306.h>
 
 class ScoreManager;   // forward declaration
+class WiFiHandler;    // forward declaration (D4 — full type only in DisplayManager.cpp)
 
 class DisplayManager {
 public:
@@ -22,11 +23,14 @@ public:
         RECONNECTING,  ///< "Mesa N ⚉ buscando hub" (FW-3)
         UNBOUND,       ///< pairing affordance "Pair me <call-sign>" (BND-5)
         FINISHED,      ///< "Fin: 3–2" + "new match from mobile" (MATCH-2)
+        SESSION_END,   ///< "Sesion finalizada" + "pair from mobile" (REQ-FB-5)
         SLEEP          ///< display off after inactivity; wake on any activity (E13/E15)
     };
 
     /// Connected-state inactivity timeout before falling to SLEEP (E13).
     static constexpr unsigned long SLEEP_TIMEOUT_MS = 60000;
+    /// SESSION_END dwell before auto-advancing to UNBOUND (REQ-FB-5).
+    static constexpr unsigned long SESSION_END_TIMEOUT_MS = 4000;
 
     DisplayManager();
 
@@ -60,6 +64,17 @@ public:
     /// Mark the wrong-AP fatal condition (rendered by CONNECTING, E6).
     void setWrongAp(bool wrongAp) { _wrongAp = wrongAp; }
 
+    /// Track whether the bound court has an active match (REQ-FB-3).
+    /// CONNECTED renders truncated names + score when true, the no-match
+    /// hint when false; re-renders immediately when already CONNECTED.
+    void setMatchActive(bool active) {
+        _matchActive = active;
+        if (_state == State::CONNECTED) render();
+    }
+
+    /// Inject the WiFi handler so CONNECTING can probe the AP link (D4).
+    void setWifiHandler(WiFiHandler* wifi) { _wifi = wifi; }
+
     /// Current state (main uses it to decide wake targets).
     State state() const { return _state; }
 
@@ -87,6 +102,11 @@ private:
     String _callSign;
     bool   _wrongAp;
 
+    // Match-activity flag (REQ-FB-3) + CONNECTING phase-line probe (D4)
+    bool         _matchActive;
+    WiFiHandler* _wifi;
+    bool         _apUpLast;
+
     // --- helpers ---
     void transitionTo(State s);
     void render();
@@ -105,6 +125,7 @@ private:
     void renderReconnecting();
     void renderUnbound();
     void renderFinished();
+    void renderSessionEnd();
     void renderSleep();
 };
 

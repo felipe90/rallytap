@@ -42,6 +42,10 @@ public:
     /// True while the WS socket is up and register has been sent (PROTO-1).
     bool isConnected() const { return _wsConnected; }
 
+    /// True while the STA link to the AP is up — drives the CONNECTING phase
+    /// line (REQ-FB-4). Same probe WiFiHandler.cpp uses for phase transitions.
+    bool isApUp() const { return WiFi.status() == WL_CONNECTED; }
+
     /// True after the fatal backoff timeout on a wrong/unreachable AP (E6).
     bool isFatal() const { return _phase == Phase::FATAL; }
 
