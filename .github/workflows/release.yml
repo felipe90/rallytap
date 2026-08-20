@@ -12,7 +12,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        env: [esp32dev, hw454b]
+        # Only envs defined in firmware/rallytap/platformio.ini on main.
+        # Add hw454b once the feat/hw454b-integrated-oled SDD PR merges.
+        env: [esp32dev]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python

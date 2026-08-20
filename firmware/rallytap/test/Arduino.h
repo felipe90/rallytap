@@ -290,12 +290,12 @@ static inline long random(long howsmall, long howbig) {
 }
 
 // ---------------------------------------------------------------------------
-// abs() — redefinition guard
+// No abs() macro is provided on purpose: the Arduino core defines abs as a
+// function-like macro, but on host builds that macro corrupts libstdc++'s
+// internal headers (g++ <tr1/bessel_function.tcc> etc.) where abs appears as
+// a function name, producing "expected unqualified-id before '(' token".
+// Nothing in the tested code calls abs(), and std::abs is available via
+// <stdlib.h> above, so the macro is simply omitted.
 // ---------------------------------------------------------------------------
-
-#ifdef abs
-#undef abs
-#endif
-#define abs(x) ((x) >= 0 ? (x) : -(x))
 
 #endif // STUB_ARDUINO_H
